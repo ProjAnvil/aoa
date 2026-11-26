@@ -1,0 +1,169 @@
+# Knative Eventing is the CloudEvents-native event listener of the Go
+# cloud-native stack. A Broker receives events from sources. Triggers filter
+# on the CloudEvent type and POST them to the aoad Service at /events.
+#
+# maxScale=1 is REQUIRED: the inbox lease allows only one active worker to
+# make progress. Extra replicas only increase lease contention.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aoa-data
+  namespace: default
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: aoa
+  namespace: default
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: aoad
+  namespace: default
+  annotations:
+    networking.knative.dev/visibility: cluster-local
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        # Dapr sidecar injection, when AOA_ADAPTERS includes dapr.
+        dapr.io/enabled: "false"
+        dapr.io/app-id: "aoa"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: aoa
+      containers:
+        - name: aoad
+          image: ghcr.io/projanvil/aoa:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: AOA_ADDR
+              value: ":8080"
+            - name: AOA_DB
+              value: "/data/aoa.db"
+            - name: AOA_CKPT_DB
+              value: "/data/aoa-ckpt.db"
+            - name: AOA_MEMORY_DIR
+              value: "/data/memory"
+            - name: AOA_LOG_FORMAT
+              value: "json"
+            - name: AOA_LOG_LEVEL
+              value: "info"
+            - name: AOA_MODEL
+              value: "anthropic:claude-sonnet-4-5"
+            - name: AOA_PROXY_ALLOWLIST
+              value: "gateway.internal"
+            - name: AOA_SIGNATURE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aoa-secrets
+                  key: signature
+            - name: AOA_PROXY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aoa-secrets
+                  key: proxy-token
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aoa-secrets
+                  key: anthropic-api-key
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: aoa-data
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aoa
+  namespace: default
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: aoa-webhook
+  namespace: default
+spec:
+  broker: aoa
+  filter:
+    attributes:
+      type: com.projanvil.aoa.webhook
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: aoad
+    uri: /events
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: aoa-user-message
+  namespace: default
+spec:
+  broker: aoa
+  filter:
+    attributes:
+      type: com.projanvil.aoa.user.message
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: aoad
+    uri: /events
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: aoa-background
+  namespace: default
+spec:
+  broker: aoa
+  filter:
+    attributes:
+      type: com.projanvil.aoa.background
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: aoad
+    uri: /events

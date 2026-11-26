@@ -1,0 +1,12 @@
+coverage.out
+*.db
+*.db-shm
+*.db-wal
+memory/
+aoa.db
+aoa-ckpt.db
+/bin/
+/dist/
+examples/*/bin/
+examples/.env
+.workbuddy/

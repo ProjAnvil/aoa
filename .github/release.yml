@@ -1,0 +1,46 @@
+# GitHub-generated release notes configuration.
+# Categories follow the conventions used by large Go / CNCF projects.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - duplicate
+      - question
+      - invalid
+    authors:
+      - dependabot[bot]
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+        - Semver-Major
+    - title: Features
+      labels:
+        - enhancement
+        - feature
+        - Semver-Minor
+    - title: Bug Fixes
+      labels:
+        - bug
+        - fix
+        - Semver-Patch
+    - title: Security
+      labels:
+        - security
+    - title: Performance
+      labels:
+        - performance
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: Tests and CI
+      labels:
+        - tests
+        - ci
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"

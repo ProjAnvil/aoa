@@ -1,0 +1,115 @@
+# Kubernetes AdmissionReview v1 webhook protocol. No cluster is required:
+# aoa-probe plays the API server and POSTs an AdmissionReview to /k8s/events.
+# In a real cluster, point a ValidatingWebhookConfiguration at this service.
+name: aoa_example_kubernetes
+
+services:
+  builder:
+    image: golang:1.27-alpine
+    working_dir: /work/aoa
+    environment:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: arm64
+      GOMODCACHE: /gomodcache
+      GOCACHE: /gocache
+    volumes:
+      - ../..:/work/aoa:ro
+      - ../../../langchain_port/langchain_golang:/work/langchain_port/langchain_golang:ro
+      - ./bin:/out
+      - gomodcache:/gomodcache
+      - gocache:/gocache
+    command:
+      - sh
+      - -c
+      - go build -o /out/aoad ./cmd/aoad && go build -o /out/aoa-probe ./examples/cmd/probe
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      HTTP_PROXY: ${AOA_EXAMPLE_PROXY:-}
+      HTTPS_PROXY: ${AOA_EXAMPLE_PROXY:-}
+      http_proxy: ${AOA_EXAMPLE_PROXY:-}
+      https_proxy: ${AOA_EXAMPLE_PROXY:-}
+      NO_PROXY: "localhost,127.0.0.1,ollama,redis,nats,redpanda,aoad,sink"
+      no_proxy: "localhost,127.0.0.1,ollama,redis,nats,redpanda,aoad,sink"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  pull-model:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: ["-sS", "--max-time", "1200", "-X", "POST",
+      "http://ollama:11434/api/pull", "-H", "Content-Type: application/json",
+      "-d", '{"name":"${OLLAMA_MODEL:-qwen2.5:0.5b}","stream":false,"insecure":true}']
+
+  aoad:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+      pull-model:
+        condition: service_completed_successfully
+    environment:
+      AOA_ADDR: ":8080"
+      AOA_DB: /data/aoa.db
+      AOA_CKPT_DB: /data/aoa-ckpt.db
+      AOA_MEMORY_DIR: /data/memory
+      AOA_LOG_FORMAT: ${AOA_LOG_FORMAT:-text}
+      AOA_LOG_LEVEL: ${AOA_LOG_LEVEL:-info}
+      AOA_MODEL: ${AOA_MODEL:-offline}
+      OLLAMA_HOST: http://ollama:11434
+      AOA_PROXY_TOKEN: ${AOA_PROXY_TOKEN:-example-token}
+      AOA_SIGNATURE_KEY: ${AOA_SIGNATURE_KEY:-}
+      AOA_OUTBOX_WEBHOOK: http://sink:9000/
+      AOA_ADAPTERS: kubernetes
+    volumes:
+      - ./bin:/app:ro
+      - data:/data
+    command: ["/app/aoad"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  sink:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    volumes:
+      - ./bin:/app:ro
+    command: ["/app/aoa-probe", "serve", "--addr", ":9000"]
+
+  emit:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+      aoad:
+        condition: service_healthy
+      sink:
+        condition: service_started
+    volumes:
+      - ./bin:/app:ro
+    command: ["/app/aoa-probe", "emit", "--mode", "admission",
+      "--target", "http://aoad:8080/k8s/events",
+      "--payload", "pod/api-7d9f", "--session", "prod"]
+    restart: "no"
+
+volumes:
+  ollama:
+    name: aoa_shared_ollama_models
+  gomodcache:
+    name: aoa_shared_gomodcache
+  gocache:
+    name: aoa_shared_gocache
+  data: {}

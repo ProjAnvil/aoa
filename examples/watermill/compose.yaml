@@ -1,0 +1,129 @@
+# Watermill message.Subscriber backed by Redis Streams.
+name: aoa_example_watermill
+
+services:
+  builder:
+    image: golang:1.27-alpine
+    working_dir: /work/aoa
+    environment:
+      CGO_ENABLED: "0"
+      GOOS: linux
+      GOARCH: arm64
+      GOMODCACHE: /gomodcache
+      GOCACHE: /gocache
+    volumes:
+      - ../..:/work/aoa:ro
+      - ../../../langchain_port/langchain_golang:/work/langchain_port/langchain_golang:ro
+      - ./bin:/out
+      - gomodcache:/gomodcache
+      - gocache:/gocache
+    command:
+      - sh
+      - -c
+      - go build -o /out/aoad ./cmd/aoad && go build -o /out/aoa-probe ./examples/cmd/probe
+
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      HTTP_PROXY: ${AOA_EXAMPLE_PROXY:-}
+      HTTPS_PROXY: ${AOA_EXAMPLE_PROXY:-}
+      http_proxy: ${AOA_EXAMPLE_PROXY:-}
+      https_proxy: ${AOA_EXAMPLE_PROXY:-}
+      NO_PROXY: "localhost,127.0.0.1,ollama,redis,nats,redpanda,aoad,sink"
+      no_proxy: "localhost,127.0.0.1,ollama,redis,nats,redpanda,aoad,sink"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+  pull-model:
+    image: curlimages/curl:8.11.1
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: ["-sS", "--max-time", "1200", "-X", "POST",
+      "http://ollama:11434/api/pull", "-H", "Content-Type: application/json",
+      "-d", '{"name":"${OLLAMA_MODEL:-qwen2.5:0.5b}","stream":false,"insecure":true}']
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  aoad:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+      pull-model:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      AOA_ADDR: ":8080"
+      AOA_DB: /data/aoa.db
+      AOA_CKPT_DB: /data/aoa-ckpt.db
+      AOA_MEMORY_DIR: /data/memory
+      AOA_LOG_FORMAT: ${AOA_LOG_FORMAT:-text}
+      AOA_LOG_LEVEL: ${AOA_LOG_LEVEL:-info}
+      AOA_MODEL: ${AOA_MODEL:-offline}
+      OLLAMA_HOST: http://ollama:11434
+      AOA_PROXY_TOKEN: ${AOA_PROXY_TOKEN:-example-token}
+      AOA_SIGNATURE_KEY: ${AOA_SIGNATURE_KEY:-}
+      AOA_OUTBOX_WEBHOOK: http://sink:9000/
+      AOA_ADAPTERS: webhook
+      AOA_BROKERS: watermill
+      AOA_WATERMILL_REDIS: redis:6379
+      AOA_WATERMILL_TOPIC: aoa-events
+    volumes:
+      - ./bin:/app:ro
+      - data:/data
+    command: ["/app/aoad"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  sink:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    volumes:
+      - ./bin:/app:ro
+    command: ["/app/aoa-probe", "serve", "--addr", ":9000"]
+
+  emit:
+    image: alpine:3.20
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+      aoad:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./bin:/app:ro
+    command: ["/app/aoa-probe", "publish-redis", "--addr", "redis:6379",
+      "--stream", "aoa-events", "--payload", "P95 > 800ms"]
+    restart: "no"
+
+volumes:
+  ollama:
+    name: aoa_shared_ollama_models
+  gomodcache:
+    name: aoa_shared_gomodcache
+  gocache:
+    name: aoa_shared_gocache
+  redis-data: {}
+  data: {}
