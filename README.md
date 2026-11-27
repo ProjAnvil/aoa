@@ -130,7 +130,7 @@ and `event_id`.
 | `make fuzz` | CloudEvents decoder fuzz |
 | `make check` | tidy, fmt, vet, race, cover-check |
 
-Current total coverage: **91.0%**.
+Current total coverage: **94.3%**.
 
 ## Security boundary
 
