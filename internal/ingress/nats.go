@@ -22,12 +22,28 @@ type NATSListener struct {
 	durable string
 
 	mu     sync.Mutex
-	conn   *nats.Conn
+	conn   natsConn
 	sub    *nats.Subscription
 	cancel context.CancelFunc
+	dial   func(string) (natsConn, error)
 }
 
 var _ Listener = (*NATSListener)(nil)
+
+// natsConn is the narrow client surface Start needs. Tests inject a fake so
+// the subscription loop can be exercised without a broker.
+type natsConn interface {
+	JetStream(opts ...nats.JSOpt) (nats.JetStreamContext, error)
+	Close()
+}
+
+func defaultNATSDial(url string) (natsConn, error) {
+	conn, err := nats.Connect(url)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
 
 // NewNATSListener is the registry factory for the "nats" adapter.
 func NewNATSListener(cfg Config) (Listener, error) {
@@ -50,7 +66,11 @@ func (l *NATSListener) Name() string { return "nats" }
 // Start connects and subscribes. It returns after the subscription is live;
 // message processing runs in the client's own goroutines.
 func (l *NATSListener) Start(ctx context.Context, sink Sink) error {
-	conn, err := nats.Connect(l.url)
+	dial := l.dial
+	if dial == nil {
+		dial = defaultNATSDial
+	}
+	conn, err := dial(l.url)
 	if err != nil {
 		return fmt.Errorf("ingress: nats connect: %w", err)
 	}

@@ -17,11 +17,19 @@ type KafkaListener struct {
 	topic  string
 	group  string
 
-	mu     sync.Mutex
-	reader *kafka.Reader
+	mu        sync.Mutex
+	reader    kafkaMessageReader
+	newReader func() kafkaMessageReader
 }
 
 var _ Listener = (*KafkaListener)(nil)
+
+// kafkaMessageReader is the narrow reader surface Start needs. Tests inject a
+// fake so the consumer loop can be exercised without a broker.
+type kafkaMessageReader interface {
+	ReadMessage(ctx context.Context) (kafka.Message, error)
+	Close() error
+}
 
 // NewKafkaListener is the registry factory for the "kafka" adapter.
 func NewKafkaListener(cfg Config) (Listener, error) {
@@ -42,13 +50,18 @@ func (l *KafkaListener) Name() string { return "kafka" }
 
 // Start begins a blocking read loop. Callers run it in a goroutine.
 func (l *KafkaListener) Start(ctx context.Context, sink Sink) error {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  strings.Split(l.broker, ","),
-		Topic:    l.topic,
-		GroupID:  l.group,
-		MinBytes: 1,
-		MaxBytes: 1 << 20,
-	})
+	var reader kafkaMessageReader
+	if l.newReader != nil {
+		reader = l.newReader()
+	} else {
+		reader = kafka.NewReader(kafka.ReaderConfig{
+			Brokers:  strings.Split(l.broker, ","),
+			Topic:    l.topic,
+			GroupID:  l.group,
+			MinBytes: 1,
+			MaxBytes: 1 << 20,
+		})
+	}
 	l.mu.Lock()
 	l.reader = reader
 	l.mu.Unlock()

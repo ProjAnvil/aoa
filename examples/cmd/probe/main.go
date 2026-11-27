@@ -33,35 +33,44 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	if err := dispatch(os.Args[1:]); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+// dispatch is separated from main so tests can exercise the command switch
+// without terminating the process.
+func dispatch(args []string) error {
+	if len(args) < 1 {
 		usage()
-		os.Exit(2)
+		return fmt.Errorf("aoa-probe: missing command")
 	}
 	var err error
-	switch os.Args[1] {
+	switch args[0] {
 	case "hello":
-		err = hello(os.Args[2:])
+		err = hello(args[1:])
 	case "agent-hello":
-		err = agentHello(os.Args[2:])
+		err = agentHello(args[1:])
 	case "emit":
-		err = emit(os.Args[2:])
+		err = emit(args[1:])
 	case "publish-nats":
-		err = publishNATS(os.Args[2:])
+		err = publishNATS(args[1:])
 	case "publish-kafka":
-		err = publishKafka(os.Args[2:])
+		err = publishKafka(args[1:])
 	case "publish-redis":
-		err = publishRedis(os.Args[2:])
+		err = publishRedis(args[1:])
 	case "serve":
-		err = serve(os.Args[2:])
+		err = serve(args[1:])
 	case "scenario":
-		err = scenario(os.Args[2:])
+		err = scenario(args[1:])
 	default:
 		usage()
-		os.Exit(2)
+		return fmt.Errorf("aoa-probe: unknown command %q", args[0])
 	}
 	if err != nil {
-		log.Fatalf("aoa-probe %s: %v", os.Args[1], err)
+		return fmt.Errorf("aoa-probe %s: %w", args[0], err)
 	}
+	return nil
 }
 
 func usage() {
@@ -296,13 +305,24 @@ func scenario(args []string) error {
 	return postOnce(f)
 }
 
+// natsPublishConn and newNATSConn narrow the client surface publishNATS
+// needs. Tests inject a fake so no broker is required.
+type natsPublishConn interface {
+	JetStream(opts ...nats.JSOpt) (nats.JetStreamContext, error)
+	Close()
+}
+
+var newNATSConn = func(url string) (natsPublishConn, error) {
+	return nats.Connect(url)
+}
+
 func publishNATS(args []string) error {
 	fs := flag.NewFlagSet("publish-nats", flag.ExitOnError)
 	url := fs.String("url", "nats://nats:4222", "NATS URL")
 	subject := fs.String("subject", "aoa.events", "subject")
 	payload := fs.String("payload", "P95 > 800ms", "message body")
 	fs.Parse(args)
-	nc, err := nats.Connect(*url)
+	nc, err := newNATSConn(*url)
 	if err != nil {
 		return err
 	}
@@ -326,15 +346,24 @@ func publishNATS(args []string) error {
 	return nil
 }
 
+// kafkaMsgWriter and newKafkaWriter let tests exercise publishKafka without
+// a Kafka broker.
+type kafkaMsgWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
+}
+
+var newKafkaWriter = func(brokers []string, topic string) kafkaMsgWriter {
+	return kafka.NewWriter(kafka.WriterConfig{Brokers: brokers, Topic: topic})
+}
+
 func publishKafka(args []string) error {
 	fs := flag.NewFlagSet("publish-kafka", flag.ExitOnError)
 	brokers := fs.String("brokers", "redpanda:9092", "Kafka brokers")
 	topic := fs.String("topic", "aoa-events", "topic")
 	payload := fs.String("payload", "P95 > 800ms", "message body")
 	fs.Parse(args)
-	w := kafka.NewWriter(kafka.WriterConfig{
-		Brokers: strings.Split(*brokers, ","), Topic: *topic,
-	})
+	w := newKafkaWriter(strings.Split(*brokers, ","), *topic)
 	defer w.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -372,12 +401,16 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addr := fs.String("addr", ":9000", "listen address")
 	fs.Parse(args)
+	fmt.Printf("outbox receiver listening on %s\n", *addr)
+	return http.ListenAndServe(*addr, outboxHandler())
+}
+
+func outboxHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		fmt.Printf("OUTBOX DELIVERY %s\n", strings.TrimSpace(string(body)))
 		w.WriteHeader(http.StatusOK)
 	})
-	fmt.Printf("outbox receiver listening on %s\n", *addr)
-	return http.ListenAndServe(*addr, mux)
+	return mux
 }

@@ -1,5 +1,5 @@
 GO ?= go
-COVER_THRESHOLD ?= 65
+COVER_THRESHOLD ?= 90
 COVER_FILE ?= coverage.out
 
 .PHONY: build test race cover cover-check fuzz vet fmt check clean tidy

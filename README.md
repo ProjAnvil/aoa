@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-65%25%2B-brightgreen.svg)](Makefile)
+[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen.svg)](Makefile)
 
 [中文文档 / Chinese README](README.zh-CN.md)
 
@@ -126,11 +126,11 @@ and `event_id`.
 | `make test` | unit tests |
 | `make race` | `-race` |
 | `make cover` | `coverage.out` + per-function report |
-| `make cover-check` | fails below 65% total |
+| `make cover-check` | fails below 90% total |
 | `make fuzz` | CloudEvents decoder fuzz |
 | `make check` | tidy, fmt, vet, race, cover-check |
 
-Current total coverage: **65.7%**.
+Current total coverage: **90.9%**.
 
 ## Security boundary
 

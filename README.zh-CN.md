@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8.svg)](https://go.dev/)
-[![Coverage](https://img.shields.io/badge/coverage-65%25%2B-brightgreen.svg)](Makefile)
+[![Coverage](https://img.shields.io/badge/coverage-90%25%2B-brightgreen.svg)](Makefile)
 
 [English README](README.md)
 
@@ -101,11 +101,11 @@ make -C examples validate       # 校验八个 compose 文件
 | `make test` | 单元测试 |
 | `make race` | `-race` |
 | `make cover` | `coverage.out` 与逐函数报告 |
-| `make cover-check` | 总覆盖率低于 65% 失败 |
+| `make cover-check` | 总覆盖率低于 90% 失败 |
 | `make fuzz` | CloudEvents 解码器 fuzz |
 | `make check` | tidy、fmt、vet、race、cover-check |
 
-当前总覆盖率 **65.7%**。
+当前总覆盖率 **90.9%**。
 
 ## 安全边界
 

@@ -127,7 +127,7 @@ func buildRoutes(reg *ingress.Registry, names []string, cfg ingress.Config) ([]i
 	return routes, nil
 }
 
-func run() error {
+func run(ctx context.Context) error {
 	logger := telemetry.NewLogger(os.Stdout, env("AOA_LOG_FORMAT", "json"), env("AOA_LOG_LEVEL", "info"))
 	slog.SetDefault(logger)
 	metrics := &telemetry.Metrics{}
@@ -225,9 +225,6 @@ func run() error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	loops := []func(context.Context) error{worker.Run, scheduler.Run, dispatcher.Run}
 	for _, loop := range loops {
 		go func(fn func(context.Context) error) {
@@ -272,7 +269,9 @@ func run() error {
 }
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
 		slog.Error("aoad failed", "error", err)
 		os.Exit(1)
 	}

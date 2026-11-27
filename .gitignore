@@ -2,7 +2,8 @@ coverage.out
 *.db
 *.db-shm
 *.db-wal
-memory/
+/memory/
+/aoad
 aoa.db
 aoa-ckpt.db
 /bin/
