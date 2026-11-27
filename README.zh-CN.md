@@ -105,7 +105,7 @@ make -C examples validate       # 校验八个 compose 文件
 | `make fuzz` | CloudEvents 解码器 fuzz |
 | `make check` | tidy、fmt、vet、race、cover-check |
 
-当前总覆盖率 **94.3%**。
+当前总覆盖率 **94.7%**。
 
 ## 安全边界
 
